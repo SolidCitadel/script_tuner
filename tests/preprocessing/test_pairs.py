@@ -93,6 +93,22 @@ def test_normalize_em_dash_and_en_dash() -> None:
     assert _normalize_typography("from A—to B and A–B") == "from A-to B and A-B"
 
 
+def test_normalize_non_breaking_hyphen() -> None:
+    # U+2011 (non-breaking hyphen) often produced by LLMs in compound words
+    assert _normalize_typography("forty‑five") == "forty-five"
+
+
+def test_normalize_all_dash_variants() -> None:
+    text = "a‐b‑c‒d–e—f―g"
+    assert _normalize_typography(text) == "a-b-c-d-e-f-g"
+
+
+def test_normalize_unusual_space_variants() -> None:
+    # U+00A0 nbsp, U+2009 thin, U+200A hair, U+202F narrow nbsp → regular space
+    text = "A B C D E"
+    assert _normalize_typography(text) == "A B C D E"
+
+
 def test_normalize_ellipsis_char() -> None:
     assert _normalize_typography("wait… maybe") == "wait... maybe"
 

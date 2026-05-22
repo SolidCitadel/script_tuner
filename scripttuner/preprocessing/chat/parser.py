@@ -17,8 +17,11 @@ _UTTERANCE_LINE_RE = re.compile(r"^\*([A-Z0-9]+):\s*(.*)$")
 _HEADER_LINE_RE = re.compile(r"^@(\w+)(?::\s*(.*))?$")
 # 이어지는 라인: 공백/탭으로 시작
 _CONTINUATION_RE = re.compile(r"^\s+(.*)$")
-# 타임스탬프 토큰: 발화 라인 끝의 "1234_5678" 형식
-_TIMESTAMP_RE = re.compile(r"(?<!\d)(\d+)_(\d+)(?!\d)")
+# 타임스탬프 토큰: 발화 라인 끝의 "1234_5678" 형식.
+# CHAT의 sound-bullet delimiter `\x15` (NAK)이 양옆에 붙는 경우도 함께 제거.
+_TIMESTAMP_RE = re.compile(r"\x15?(?<!\d)(\d+)_(\d+)(?!\d)\x15?")
+# 잔존 NAK 정리용 (timestamp 외 위치에 떠도는 NAK)
+_NAK_RE = re.compile(r"\x15")
 
 
 def parse(path: Path, source: str = "SBCSAE") -> tuple[dict[str, list[str]], list[Utterance]]:
@@ -103,10 +106,18 @@ def parse(path: Path, source: str = "SBCSAE") -> tuple[dict[str, list[str]], lis
 
 
 def _extract_timestamps(text: str) -> tuple[int | None, int | None, str]:
-    """Extract timestamp tokens from text. Returns (t_start, t_end, stripped_text)."""
+    """Extract timestamp tokens from text. Returns (t_start, t_end, stripped_text).
+
+    NAK characters (CHAT sound-bullet delimiter) are removed even when no
+    timestamp pattern matches, since they sometimes drift apart from the
+    timestamp pair in malformed lines.
+    """
     matches = list(_TIMESTAMP_RE.finditer(text))
     if not matches:
-        return None, None, text
+        stripped = _NAK_RE.sub("", text)
+        if stripped != text:
+            stripped = re.sub(r"\s+", " ", stripped).strip()
+        return None, None, stripped
 
     starts = [int(m.group(1)) for m in matches]
     ends = [int(m.group(2)) for m in matches]
@@ -114,5 +125,6 @@ def _extract_timestamps(text: str) -> tuple[int | None, int | None, str]:
     t_end = max(ends)
 
     stripped = _TIMESTAMP_RE.sub("", text)
+    stripped = _NAK_RE.sub("", stripped)
     stripped = re.sub(r"\s+", " ", stripped).strip()
     return t_start, t_end, stripped

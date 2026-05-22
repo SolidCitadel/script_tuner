@@ -46,13 +46,21 @@ _MULTISPACE_RE = re.compile(r"\s+")
 # 학습 신호에 섞이지 않는다. 후처리 단계라 캐시된 raw 응답을 무효화하지 않는다.
 _TYPOGRAPHY_MAP = str.maketrans(
     {
-        "‘": "'",  # left single quote
-        "’": "'",  # right single quote
-        "“": '"',  # left double quote
-        "”": '"',  # right double quote
-        "–": "-",  # en-dash
-        "—": "-",  # em-dash
-        "…": "...",  # horizontal ellipsis
+        "‘": "'",  # U+2018 left single quote
+        "’": "'",  # U+2019 right single quote
+        "“": '"',  # U+201C left double quote
+        "”": '"',  # U+201D right double quote
+        "‐": "-",  # U+2010 hyphen
+        "‑": "-",  # U+2011 non-breaking hyphen
+        "‒": "-",  # U+2012 figure dash
+        "–": "-",  # U+2013 en-dash
+        "—": "-",  # U+2014 em-dash
+        "―": "-",  # U+2015 horizontal bar
+        "…": "...",  # U+2026 horizontal ellipsis
+        " ": " ",  # no-break space
+        " ": " ",  # thin space
+        " ": " ",  # hair space
+        " ": " ",  # narrow no-break space
     }
 )
 

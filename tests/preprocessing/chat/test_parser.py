@@ -64,6 +64,15 @@ def test_multiline_utterance_combined(sample_path: Path) -> None:
     assert "&=laugh" in first.text
 
 
+def test_nak_delimiters_removed(tmp_path: Path) -> None:
+    """CHAT의 sound-bullet delimiter \\x15가 spoken text에 안 남아야 한다."""
+    cha = "@UTF8\n@Begin\n*TAMM:\thello \x15760_1735\x15 world.\n@End\n"
+    p = tmp_path / "nak.cha"
+    p.write_text(cha, encoding="utf-8")
+    _, utts = parser.parse(p)
+    assert "\x15" not in utts[0].text
+
+
 def test_timestamps_extracted_and_stripped(sample_path: Path) -> None:
     _, utterances = parser.parse(sample_path)
     first = utterances[0]
