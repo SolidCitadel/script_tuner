@@ -69,3 +69,37 @@ class Monologue:
 
     metadata: dict[str, Any] = field(default_factory=dict)
     """추가 메타데이터."""
+
+
+@dataclass(frozen=True)
+class Pair:
+    """(formal_text, spoken_text) 학습 페어. 모듈 ④ LLM 역변환의 출력 형식.
+
+    파인튜닝 시 모델은 formal_text → spoken_text 방향으로 학습한다.
+    spoken_text는 monologue.text 원본을 그대로 보존하며(pause 토큰 포함),
+    formal_text는 LLM이 생성한 정제된 문어체 paraphrase이다.
+    """
+
+    pair_id: str
+    """Pair identifier (e.g. 'SBC016#mono_0001#casual#v1-zero-shot')."""
+
+    source: str
+    """Corpus identifier (e.g. 'SBCSAE')."""
+
+    style: str
+    """Style label (e.g. 'casual', 'semi-formal'). cf. ADR-0005."""
+
+    speaker: str
+    """Speaker identifier."""
+
+    spoken_text: str
+    """원본 monologue 텍스트 (pause 토큰 보존)."""
+
+    formal_text: str
+    """LLM이 생성한 정제된 문어체 paraphrase."""
+
+    monologue_id: str
+    """이 페어를 생성한 원본 monologue ID (트레이스용)."""
+
+    metadata: dict[str, Any] = field(default_factory=dict)
+    """LLM 모델, prompt_version, token usage 등."""

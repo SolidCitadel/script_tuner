@@ -3,7 +3,11 @@ name = "scripttuner"
 version = "0.1.0"
 description = "구어체 특화형 영어 스크립트 변환 모델 (OPIc 대비)"
 requires-python = ">=3.11"
-dependencies = []
+dependencies = [
+    "openai>=1.50",
+    "python-dotenv>=1.0",
+    "tqdm>=4.66",
+]
 
 [project.scripts]
 scripttuner = "scripttuner.cli:main"
@@ -13,6 +17,7 @@ dev = [
     "pytest>=8.0",
     "ruff>=0.6",
     "mypy>=1.11",
+    "types-tqdm>=4.66",
 ]
 
 [build-system]
@@ -44,3 +49,4 @@ warn_unused_configs = true
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 python_files = ["test_*.py"]
+addopts = "--import-mode=importlib"

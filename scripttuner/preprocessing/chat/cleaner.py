@@ -28,6 +28,12 @@ _NONVERBAL_RE = re.compile(r"&=\S+")
 # 4. 성문 폐쇄음 표기: 단어 시작의 ʔ (예: ʔuh → uh, youʔ → you)
 _GLOTTAL_RE = re.compile(r"ʔ")
 
+# 4b. Vowel lengthening: 알파벳 직후의 ":" (CHAT에서 모음 늘림 표기)
+# 예: "I:" → "I", "u:m" → "um", "perc:e:nt" → "percent"
+# overlap marker가 vowel lengthening 사이에 끼면 1단계 제거 후 "Yeah::" 같은
+# 연속 colon이 생기므로 `:+`로 연속 colon을 한 번에 잡는다.
+_VOWEL_LENGTH_RE = re.compile(r"(?<=[a-zA-Z]):+")
+
 # 5. 발화 중단: +/.  (다른 +/ 형식 변형이 있으면 추가)
 _TRAILOFF_INTERRUPT_RE = re.compile(r"\+/\.")
 
@@ -63,6 +69,9 @@ def clean_text(text: str) -> str:
 
     # 4. 성문 폐쇄음 표기 정규화
     text = _GLOTTAL_RE.sub("", text)
+
+    # 4b. Vowel lengthening colon 제거
+    text = _VOWEL_LENGTH_RE.sub("", text)
 
     # 5. 발화 중단 → 자연 종결
     text = _TRAILOFF_INTERRUPT_RE.sub(".", text)

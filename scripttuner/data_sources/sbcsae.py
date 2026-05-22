@@ -23,6 +23,8 @@ ZIP_URL = (
     "sitefiles/research/SBC/SBCSAE_chat.zip"
 )
 EXPECTED_FILES = 60
+SOURCE_NAME = "SBCSAE"
+"""IR `source` field value 및 디스크 산출물 디렉토리 이름 (e.g. data/parsed/SBCSAE/)."""
 
 
 def _default_fetcher(url: str) -> bytes:

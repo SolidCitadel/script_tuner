@@ -22,15 +22,21 @@ CHA(CHILDES) 포맷의 원어민 대화 전사 데이터를 **OPIc 모놀로그 
 ### 패키지 구조
 
 ```
-scripttuner/preprocessing/
-├── ir.py                # 공통 IR — Utterance dataclass
-├── chat/                # CHAT (CHILDES) 어댑터 — SBCSAE 등
-│   ├── parser.py        # ① CHAT 파서
-│   └── cleaner.py       # ② CHAT 정규화
-├── switchboard/         # (미래) Switchboard 어댑터
-├── monologue.py         # ③ 공통
-├── pairs.py             # ④ 공통
-└── stats.py             # ⑤ 공통
+scripttuner/
+├── preprocessing/
+│   ├── ir.py                # 공통 IR — Utterance, Monologue, Pair dataclass
+│   ├── chat/                # CHAT (CHILDES) 어댑터 — SBCSAE 등
+│   │   ├── parser.py        # ① CHAT 파서
+│   │   └── cleaner.py       # ② CHAT 정규화
+│   ├── switchboard/         # (미래) Switchboard 어댑터
+│   ├── monologue.py         # ③ 공통
+│   ├── pairs.py             # ④ 공통 — LLMClient Protocol + convert_to_formal
+│   └── stats.py             # ⑤ 공통
+├── persistence/             # 디스크 적재/직렬화 영역
+│   ├── jsonl.py             #   JSONL I/O (dataclass ↔ dict)
+│   └── cache.py             #   sha256-keyed JSON KV 캐시 (LLM 응답 등)
+└── llm/                     # LLM 클라이언트 (provider-agnostic, cf. ADR-0007)
+    └── openai_compatible.py #   OpenAI SDK 래퍼
 ```
 
 ## 파이프라인 구조
@@ -61,7 +67,10 @@ scripttuner/preprocessing/
    ▼ monologues/*.jsonl
    │
 ④ (구어체 → 문어체) 역변환 (pairs.py) — 코퍼스 무관
-   - 상용 LLM 프롬프트로 정제된 문어체 페어 생성
+   - LLM 호출로 정제된 문어체 페어 생성 (provider-agnostic, cf. ADR-0007)
+   - 입력 전처리: <pause:*> 토큰 strip (LLM은 토큰을 모름, cf. ADR-0008)
+   - 출력 후처리: typography ASCII 정규화 (스마트 따옴표·em-dash → ASCII)
+   - 디스크 캐싱: sha256(prompt_version+model+stripped_input) 키 (cf. ADR-0007)
    - 메타: style="casual" (cf. ADR-0005)
    │
    ▼ pairs/*.jsonl
@@ -110,6 +119,7 @@ class Utterance:
 | `+/.` | 발화 중단 | 자연 종결 처리 |
 | `+...` | 말끝 흐림 | `...` |
 | `ʔuh` | 성문 폐쇄음 표기 | `uh` |
+| `I:`, `u:m`, `perc:e:nt` | 모음 늘림 (vowel lengthening) | 알파벳 직후 `:` 제거 |
 | `&=tsk`, `&=laugh`, `&=in`, `&=ex` | 비언어 어노테이션 | 제거 |
 | `&{l=X ... &}l=X` | 불명확/L2 표기 | 제거 |
 | `⌈ ⌉`, `⌊n ⌋n` | 오버랩 마커 | 제거 |
@@ -118,42 +128,58 @@ class Utterance:
 ## 출력 디렉토리 구조
 
 ```
-data/                          # gitignore
-├── parsed/                    # ① 파서 출력
-│   └── SBC016.parsed.jsonl
-├── cleaned/                   # ② 정규화 출력
-│   └── SBC016.cleaned.jsonl
-├── monologues/                # ③ 재조립 출력
-│   └── SBC016.mono.jsonl
-├── pairs/                     # ④ 역변환 출력
-│   └── SBC016.pairs.jsonl
-└── stats/                     # ⑤ 통계
-    └── SBC016.stats.json
+data/                                  # gitignore
+├── parsed/<SOURCE>/<stem>.jsonl       # ① 파서 출력 (Utterance)
+├── cleaned/<SOURCE>/<stem>.jsonl      # ② 정규화 출력 (Utterance)
+├── monologues/<SOURCE>/<stem>.jsonl   # ③ 재조립 출력 (Monologue)
+├── pairs/<SOURCE>/<stem>.jsonl        # ④ 역변환 출력 (Pair)
+├── stats/<SOURCE>/<stem>.json         # ⑤ 통계
+└── cache/pairs/<sha256>.json          # ④ LLM 응답 디스크 캐시 (cf. ADR-0007)
 ```
+
+`<SOURCE>`는 corpus의 `SOURCE_NAME` (예: `SBCSAE`), `<stem>`은 파일 식별자(예: `SBC016`).
 
 원본 CHA는 `datasets/`에 위치하며 다운로드 스크립트로 확보한다 (cf. [ADR-0002](../decisions/0002-sbcsae-license-policy.md)).
 
 ## 출력 페어 스키마 (모듈 ④ 산출물)
 
+`Pair` dataclass (`scripttuner/preprocessing/ir.py`) 를 JSONL로 직렬화.
+
+```python
+@dataclass(frozen=True)
+class Pair:
+    pair_id: str          # e.g. "SBC016#mono_0001#casual#v2-zero-shot"
+    source: str           # "SBCSAE"
+    style: str            # "casual" (cf. ADR-0005)
+    speaker: str
+    spoken_text: str      # 원본 monologue.text (pause 토큰 포함, cf. ADR-0008)
+    formal_text: str      # LLM 출력 (typography ASCII 정규화 적용)
+    monologue_id: str     # 트레이스용
+    metadata: dict        # model, prompt_version, prompt/completion_tokens, from_cache 등
+```
+
+JSON 예시:
+
 ```json
 {
-  "id": "SBC016_TAMM_0001",
+  "pair_id": "SBC016#mono_0002#casual#v2-zero-shot",
   "source": "SBCSAE",
   "style": "casual",
   "speaker": "TAMM",
-  "formal_text": "I'd like to purchase a tape deck...",
-  "spoken_text": "Well <pause:short> um <pause:long> I wanted to say I'm really happy with the stuff I got now...",
-  "stats": {
-    "spoken_tokens": 142,
-    "formal_tokens": 95,
-    "filler_count": 8,
-    "pause_short": 12,
-    "pause_long": 5,
-    "phrasal_verb_ratio": 0.07,
-    "lexical_density": 0.42
+  "spoken_text": "Um  <pause:long> because on a  <pause:short> ... you're not gonna be able ...",
+  "formal_text": "Because on a tape deck like that you realize that you are not going to be able ...",
+  "monologue_id": "SBC016#mono_0002",
+  "metadata": {
+    "model": "openai/gpt-oss-120b:free",
+    "prompt_version": "v2-zero-shot",
+    "prompt_tokens": 255,
+    "completion_tokens": 67,
+    "from_cache": false
   }
 }
 ```
+
+단순 페어 단위 메트릭(spoken/formal 토큰 수, 필러 빈도, pause 빈도 등)은 모듈 ⑤ Stats에서 별도 산출한다.
 
 ## 향후 확장
 

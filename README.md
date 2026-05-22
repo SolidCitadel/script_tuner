@@ -12,9 +12,15 @@
 aip/
 ├── scripttuner/                    # 메인 Python 패키지
 │   ├── cli.py                      #   CLI 진입점 (subcommands)
+│   ├── persistence/                #   디스크 적재/직렬화 영역
+│   │   ├── jsonl.py                #     JSONL I/O (dataclass ↔ dict)
+│   │   └── cache.py                #     sha256-keyed JSON KV 캐시
+│   ├── llm/                        #   LLM 클라이언트 (provider-agnostic)
+│   │   └── openai_compatible.py    #     OpenAI SDK 래퍼
 │   ├── preprocessing/
-│   │   ├── ir.py                   #   공통 IR (Utterance, Monologue)
+│   │   ├── ir.py                   #   공통 IR (Utterance, Monologue, Pair)
 │   │   ├── monologue.py            #   ③ Monologue 재조립
+│   │   ├── pairs.py                #   ④ LLM 역변환 (구어체→문어체)
 │   │   └── chat/                   #   CHAT (CHILDES) 어댑터
 │   │       ├── parser.py           #     ① 파서
 │   │       └── cleaner.py          #     ② 정규화
@@ -32,7 +38,7 @@ aip/
 └── pyproject.toml
 ```
 
-**아직 미생성 (계획)**: ④ LLM 역변환(`pairs.py`), ⑤ 통계(`stats.py`), 진단 모듈(`diagnosis/`), 변환 모델(`transform/`), 백엔드(`api/`). 진행도는 [`docs/status.md`](docs/status.md) 참조.
+**아직 미생성 (계획)**: ⑤ 통계(`stats.py`), 진단 모듈(`diagnosis/`), 변환 모델(`transform/`), 백엔드(`api/`). 진행도는 [`docs/status.md`](docs/status.md) 참조.
 
 ## 빠른 진입점
 
@@ -62,8 +68,32 @@ uv sync
 # 2) SBCSAE 데이터셋 다운로드 (60개 .cha → datasets/sbcsae/)
 uv run scripttuner download sbcsae
 
-# 3) 테스트 / 린트 / 타입체크
+# 3) 전처리 파이프라인 — 한 파일에 대해 단계별 실행
+uv run scripttuner parse sbcsae datasets/sbcsae/SBC016.cha
+# → data/parsed/SBCSAE/SBC016.jsonl
+uv run scripttuner clean sbcsae SBC016
+# → data/cleaned/SBCSAE/SBC016.jsonl
+uv run scripttuner monologue sbcsae SBC016
+# → data/monologues/SBCSAE/SBC016.jsonl
+
+# 4) LLM 역변환 (.env 설정 필요)
+uv run scripttuner pairs sbcsae SBC016 --model <provider/model-slug>
+# → data/pairs/SBCSAE/SBC016.jsonl
+
+# 5) 테스트 / 린트 / 타입체크
 uv run pytest
 uv run ruff check .
-uv run mypy scripttuner tests scripts
+uv run mypy scripttuner tests
 ```
+
+### LLM provider 설정 (M9.2 pairs)
+
+`.env.example`을 `.env`로 복사 후 값 채움 (`.env`는 gitignore됨):
+
+```bash
+OPENAI_API_KEY=<your-key>
+OPENAI_BASE_URL=<provider-endpoint>
+# LLM_MODEL=<model-slug>   # 선택; CLI --model로도 가능
+```
+
+OpenAI SDK가 자동 인식하는 표준 변수명이므로 provider 락인 없음. OpenAI 호환 endpoint면 어떤 backend(OpenAI, OpenRouter, Together, Groq, 로컬 vLLM 등)든 같은 두 변수만으로 동작.

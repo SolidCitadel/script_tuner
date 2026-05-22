@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 import pytest
@@ -47,6 +48,28 @@ def test_lang_marker_outer_removed_inner_preserved() -> None:
 def test_glottal_stop_normalized() -> None:
     assert cleaner.clean_text("ʔuh okay") == "uh okay"
     assert cleaner.clean_text("youʔ would") == "you would"
+
+
+def test_vowel_lengthening_colon_removed_word_end() -> None:
+    assert cleaner.clean_text("I: wanted that") == "I wanted that"
+    assert cleaner.clean_text("stuff: I got") == "stuff I got"
+
+
+def test_vowel_lengthening_colon_removed_word_internal() -> None:
+    assert cleaner.clean_text("u:m well") == "um well"
+    assert cleaner.clean_text("S:o we") == "So we"
+    assert cleaner.clean_text("j:ust because") == "just because"
+
+
+def test_vowel_lengthening_multiple_colons_in_one_word() -> None:
+    assert cleaner.clean_text("perc:e:nt") == "percent"
+
+
+def test_vowel_lengthening_with_overlap_sandwich() -> None:
+    # overlap marker가 colon 사이에 끼는 케이스 (e.g. "Yeah:⌈: ⌉")
+    # 1단계 overlap 제거 후 "Yeah::"가 생기는데, 4b가 연속 colon을 모두 제거해야 함
+    assert cleaner.clean_text("Yeah:⌈: ⌉ .") == "Yeah ."
+    assert cleaner.clean_text("Y⌈2eah⌉2:⌈3: ⌉3 .") == "Yeah ."
 
 
 def test_trailoff_interrupt_to_period() -> None:
@@ -126,6 +149,12 @@ def test_integration_sbc016_no_residual_chat_markers() -> None:
     assert "ʔ" not in blob
     assert "+/." not in blob
     assert "+..." not in blob
+    # vowel-lengthening colon (e.g. "u:m", "I:", "perc:e:nt") 잔존 금지
+    # 단, 우리가 생성한 <pause:*> 토큰의 콜론은 제외
+    blob_no_pause = re.sub(r"<pause:\w+>", "", blob)
+    assert not re.search(r"[a-zA-Z]:", blob_no_pause), (
+        "vowel-lengthening colon left in cleaned text"
+    )
     # 변환된 포즈 토큰은 있어야 함 (SBC016는 포즈가 매우 많음)
     assert "<pause:short>" in blob
     assert "<pause:long>" in blob
