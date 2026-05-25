@@ -2,7 +2,7 @@
 
 > 본 문서는 **상태 추적용**이다. 일상적으로 업데이트한다. 정적 설계는 `docs/design/`, 결정 이력은 `docs/decisions/`(ADR), 거친 작업 메모는 `.work/`(gitignore)에 둔다.
 
-마지막 업데이트: 2026-05-26
+마지막 업데이트: 2026-05-28
 
 ---
 
@@ -13,10 +13,10 @@
 | 전처리 파이프라인 | 어댑터 구조 + ①~⑤(파서·cleaner·monologue·pairs·stats) + CLI | ✅ |
 | 데이터 확보·보강 | SBCSAE 1,757 pairs · Switchboard 34,895 monologues(LLM 전) · Semi-formal 미착수 | ⏳ |
 | 진단 모듈 | 구어성 진단 (⑤ stats feature를 ground truth로) | 예정 |
-| 변환 모델 학습 | LoRA 파인튜닝 · base 선택(T5Gemma2 / Gemma4) | 예정 |
+| 변환 모델 학습 | 파인튜닝 데이터 준비(speaker-aware split · 모델별 format) 완료 · LoRA 학습 코드 + base 선택(T5Gemma2 / Gemma4) 예정 | ⏳ |
 | 백엔드 / UI | 서빙 · 사용자 인터페이스 | 예정 |
 
-세부 진행 이력은 `git log` + 아래 ADR 목록 참조.
+세부 진행 이력은 `git log` + 아래 ADR 목록 참조. 파인튜닝 사전 준비(split/format) 흐름은 [`docs/design/finetuning_pipeline.md`](design/finetuning_pipeline.md) (상세 한국어판: [`finetuning_pipeline_ko.md`](design/finetuning_pipeline_ko.md)) 참조.
 
 ## 결정 이력 (ADR)
 
@@ -34,13 +34,14 @@
 
 ## 다음 액션 (단기)
 
-1. 본격 학습/모델 단계로 전환 — 변환 모델 베이스 선택, 진단 모듈, 학습 파이프라인.
-2. (선택) Switchboard ④ LLM pairs → SBCSAE와 `aggregate` 합산 (비용 발생, 증분 가능).
+1. 변환 모델 학습 코드 작성 — Gemma 4 E4B QLoRA/SFT 우선, `data/finetune/SBCSAE/formatted/<model_key>` 입력. 이후 Gemma4-E2B·Qwen3·T5Gemma2 비교.
+2. 학습 target cleaning 정책 결정 — spoken_text의 pause 토큰·전사 잔여 표기 처리 방안 (cf. `docs/design/finetuning_pipeline.md`).
+3. (선택) Switchboard ④ LLM pairs → SBCSAE와 `aggregate` 합산 (비용 발생, 증분 가능).
 
 ## 보류 / 추후 결정
 
-- **Semi-formal 스타일 데이터 확보 방안** — 인터뷰/TED 등 monologue 코퍼스 후보 조사 필요
-- **제어 토큰 학습 전략** — Semi-formal 데이터 확보 후
+- **Semi-formal 스타일 데이터 확보 방안** — 인터뷰/TED 등 monologue 코퍼스 후보 조사 필요 (현재 formatted 데이터는 casual만 존재)
+- **제어 토큰 학습 전략** — Semi-formal 데이터 확보 후. 제어 토큰 슬롯(casual / semi_formal)은 formatter에 예약됨
 - **진단 모듈 feature set 최종화** — ⑤ stats 산출 결과 보고 결정
 - **모델 변환 베이스 선택** — T5Gemma 2 vs Gemma 4 (제안서 후보 중)
 - **few-shot 도입 시점** — 현재 zero-shot 결과 양호. 후속 코퍼스 추가/품질 이슈 시 재검토
