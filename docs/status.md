@@ -2,18 +2,21 @@
 
 > 본 문서는 **상태 추적용**이다. 일상적으로 업데이트한다. 정적 설계는 `docs/design/`, 결정 이력은 `docs/decisions/`(ADR), 거친 작업 메모는 `.work/`(gitignore)에 둔다.
 
-마지막 업데이트: 2026-05-24
+마지막 업데이트: 2026-05-26
 
 ---
 
-## 마일스톤
+## 마일스톤 (단계)
 
-**M0~M13: PoC 전처리 파이프라인 + SBCSAE 60파일 배치 완료** ✅
-`scripttuner run sbcsae --all` 한 명령으로 60파일 end-to-end. 산출: `data/pairs/SBCSAE/_all.jsonl` (1,757 pairs / 131 speakers) + `data/stats/SBCSAE/_aggregate.json`. 자세한 진행 이력은 `git log` 및 아래 ADR 목록 참조.
+| 단계 | 내용 | 상태 |
+|---|---|---|
+| 전처리 파이프라인 | 어댑터 구조 + ①~⑤(파서·cleaner·monologue·pairs·stats) + CLI | ✅ |
+| 데이터 확보·보강 | SBCSAE 1,757 pairs · Switchboard 34,895 monologues(LLM 전) · Semi-formal 미착수 | ⏳ |
+| 진단 모듈 | 구어성 진단 (⑤ stats feature를 ground truth로) | 예정 |
+| 변환 모델 학습 | LoRA 파인튜닝 · base 선택(T5Gemma2 / Gemma4) | 예정 |
+| 백엔드 / UI | 서빙 · 사용자 인터페이스 | 예정 |
 
-| # | 마일스톤 | 상태 | 비고 |
-|---|---|---|---|
-| — | 진단 모듈 / 변환 모델 / 백엔드 / UI | 미정 | 본 PoC 이후 — 모델 베이스 선택, 학습 파이프라인 |
+세부 진행 이력은 `git log` + 아래 ADR 목록 참조.
 
 ## 결정 이력 (ADR)
 
@@ -25,17 +28,20 @@
 - [ADR-0006](decisions/0006-adapter-structure-and-common-ir.md) — 어댑터 구조 + 공통 IR
 - [ADR-0007](decisions/0007-llm-client-provider-agnostic-and-caching.md) — LLM 클라이언트 provider-agnostic + 디스크 캐싱
 - [ADR-0008](decisions/0008-pause-token-strip-on-llm-input.md) — LLM 입력 전 pause 토큰 strip (spoken 보존)
+- [ADR-0009](decisions/0009-switchboard-turn-reconstruction.md) — Switchboard 턴 재구성: 타임스탬프 인터리브로 ③ 재사용
+- [ADR-0010](decisions/0010-switchboard-license-policy.md) — Switchboard(MSU transcripts) 라이선스 정책
+- [ADR-0011](decisions/0011-corpus-adapter-interface.md) — 코퍼스 어댑터 인터페이스 + stem-centric 파이프라인 (`run --through`)
 
 ## 다음 액션 (단기)
 
-1. 팀에 `_all.jsonl` + `_aggregate.json` 공유 → 학습 방법 검토 피드백 수렴.
-2. 본격 학습/모델 단계로 전환 — 변환 모델 베이스 선택, 진단 모듈, 학습 파이프라인.
+1. 본격 학습/모델 단계로 전환 — 변환 모델 베이스 선택, 진단 모듈, 학습 파이프라인.
+2. (선택) Switchboard ④ LLM pairs → SBCSAE와 `aggregate` 합산 (비용 발생, 증분 가능).
 
 ## 보류 / 추후 결정
 
 - **Semi-formal 스타일 데이터 확보 방안** — 인터뷰/TED 등 monologue 코퍼스 후보 조사 필요
 - **제어 토큰 학습 전략** — Semi-formal 데이터 확보 후
-- **진단 모듈 feature set 최종화** — M11 통계 결과 보고 결정
+- **진단 모듈 feature set 최종화** — ⑤ stats 산출 결과 보고 결정
 - **모델 변환 베이스 선택** — T5Gemma 2 vs Gemma 4 (제안서 후보 중)
 - **few-shot 도입 시점** — 현재 zero-shot 결과 양호. 후속 코퍼스 추가/품질 이슈 시 재검토
 - **정량 품질 메트릭** — 본격 학습 단계 진입 시 BLEU/embedding similarity 등 도입 결정

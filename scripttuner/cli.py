@@ -2,11 +2,12 @@
 
 사용 예:
     uv run scripttuner download sbcsae
-    uv run scripttuner download sbcsae --force
-    uv run scripttuner parse sbcsae datasets/sbcsae/SBC016.cha
+    uv run scripttuner download switchboard --force
+    uv run scripttuner parse sbcsae SBC016
     uv run scripttuner clean sbcsae SBC016
     uv run scripttuner monologue sbcsae SBC016
     uv run scripttuner pairs sbcsae SBC016 --model deepseek/deepseek-v4-flash
+    uv run scripttuner run switchboard --all --through monologue
     uv run scripttuner --help
 
 `pairs` 서브커맨드는 `.env`에서 `OPENAI_API_KEY` / `OPENAI_BASE_URL` 자동 인식.
@@ -19,16 +20,13 @@ import json
 import os
 import sys
 from pathlib import Path
-from types import ModuleType
 
 from dotenv import load_dotenv
 
-from scripttuner.data_sources import sbcsae
+from scripttuner.corpora import REGISTRY
 from scripttuner.llm.openai_compatible import OpenAICompatibleClient
 from scripttuner.llm.openrouter import OpenRouterClient
 from scripttuner.persistence.jsonl import read_jsonl, write_jsonl
-from scripttuner.preprocessing.chat import cleaner as chat_cleaner
-from scripttuner.preprocessing.chat import parser as chat_parser
 from scripttuner.preprocessing.ir import Monologue, Pair, Utterance
 from scripttuner.preprocessing.monologue import DEFAULT_MIN_TOKENS, build_monologues
 from scripttuner.preprocessing.pairs import (
@@ -40,7 +38,8 @@ from scripttuner.preprocessing.stats import compute_stats
 
 DEFAULT_DATASETS_DIR = Path("datasets")
 DEFAULT_DATA_DIR = Path("data")
-CORPORA: dict[str, ModuleType] = {"sbcsae": sbcsae}
+RUN_STAGES = ("parse", "clean", "monologue", "pairs", "stats")
+"""Ordered pipeline stages the `run` orchestrator can execute."""
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -48,7 +47,7 @@ def _build_parser() -> argparse.ArgumentParser:
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     dl = subparsers.add_parser("download", help="Download a dataset by name.")
-    dl.add_argument("corpus", choices=sorted(CORPORA), help="Corpus to download.")
+    dl.add_argument("corpus", choices=sorted(REGISTRY), help="Corpus to download.")
     dl.add_argument(
         "--dest",
         type=Path,
@@ -62,10 +61,16 @@ def _build_parser() -> argparse.ArgumentParser:
     )
 
     pr = subparsers.add_parser(
-        "parse", help="Parse a CHA file into parsed Utterance JSONL."
+        "parse", help="Parse a corpus stem into parsed Utterance JSONL."
     )
-    pr.add_argument("corpus", choices=sorted(CORPORA), help="Corpus name (selects adapter).")
-    pr.add_argument("input_path", type=Path, help="Path to input .cha file.")
+    pr.add_argument("corpus", choices=sorted(REGISTRY), help="Corpus name (selects adapter).")
+    pr.add_argument("stem", help="File stem (e.g. SBC016 or sw2005).")
+    pr.add_argument(
+        "--datasets-dir",
+        type=Path,
+        default=DEFAULT_DATASETS_DIR,
+        help=f"Source corpus directory base (default: {DEFAULT_DATASETS_DIR}).",
+    )
     pr.add_argument(
         "--data-dir",
         type=Path,
@@ -76,7 +81,7 @@ def _build_parser() -> argparse.ArgumentParser:
     cl = subparsers.add_parser(
         "clean", help="Apply marker cleaning to parsed Utterance JSONL."
     )
-    cl.add_argument("corpus", choices=sorted(CORPORA), help="Corpus name (selects cleaner).")
+    cl.add_argument("corpus", choices=sorted(REGISTRY), help="Corpus name (selects cleaner).")
     cl.add_argument("stem", help="File stem (e.g. SBC016).")
     cl.add_argument(
         "--data-dir",
@@ -88,7 +93,7 @@ def _build_parser() -> argparse.ArgumentParser:
     mn = subparsers.add_parser(
         "monologue", help="Build Monologues from cleaned Utterance JSONL."
     )
-    mn.add_argument("corpus", choices=sorted(CORPORA), help="Corpus name (resolves source dir).")
+    mn.add_argument("corpus", choices=sorted(REGISTRY), help="Corpus name (resolves source dir).")
     mn.add_argument("stem", help="File stem (e.g. SBC016).")
     mn.add_argument(
         "--data-dir",
@@ -108,7 +113,7 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Convert Monologues to (formal, spoken) Pair JSONL via LLM.",
     )
     pa.add_argument(
-        "corpus", choices=sorted(CORPORA), help="Corpus name (resolves source dir)."
+        "corpus", choices=sorted(REGISTRY), help="Corpus name (resolves source dir)."
     )
     pa.add_argument("stem", help="File stem (e.g. SBC016).")
     pa.add_argument(
@@ -174,7 +179,7 @@ def _build_parser() -> argparse.ArgumentParser:
     st = subparsers.add_parser(
         "stats", help="Compute aggregate statistics over Pair JSONL."
     )
-    st.add_argument("corpus", choices=sorted(CORPORA), help="Corpus name (resolves source dir).")
+    st.add_argument("corpus", choices=sorted(REGISTRY), help="Corpus name (resolves source dir).")
     st.add_argument("stem", help="File stem (e.g. SBC016).")
     st.add_argument(
         "--data-dir",
@@ -192,7 +197,7 @@ def _build_parser() -> argparse.ArgumentParser:
         "aggregate",
         help="Concat per-stem Pair JSONLs into _all.jsonl + corpus-wide stats.",
     )
-    ag.add_argument("corpus", choices=sorted(CORPORA), help="Corpus name.")
+    ag.add_argument("corpus", choices=sorted(REGISTRY), help="Corpus name.")
     ag.add_argument(
         "--data-dir",
         type=Path,
@@ -208,9 +213,10 @@ def _build_parser() -> argparse.ArgumentParser:
     rn = subparsers.add_parser(
         "run",
         help="End-to-end pipeline: parse > clean > monologue > pairs > stats. "
-        "Accepts one or more stems, or --all for every .cha under the corpus dir.",
+        "Accepts one or more stems, or --all for every stem in the corpus dir. "
+        "Use --through to stop early (e.g. before the LLM pairs stage).",
     )
-    rn.add_argument("corpus", choices=sorted(CORPORA), help="Corpus name.")
+    rn.add_argument("corpus", choices=sorted(REGISTRY), help="Corpus name.")
     rn.add_argument(
         "stems",
         nargs="*",
@@ -220,13 +226,20 @@ def _build_parser() -> argparse.ArgumentParser:
         "--all",
         dest="all_stems",
         action="store_true",
-        help="Process every .cha file under <datasets-dir>/<corpus>/.",
+        help="Process every stem under <datasets-dir>/<corpus>/ (per the adapter).",
+    )
+    rn.add_argument(
+        "--through",
+        choices=RUN_STAGES,
+        default="stats",
+        help="Run stages up to and including this one (default: stats). "
+        "Use 'monologue' to stop before the LLM pairs stage.",
     )
     rn.add_argument(
         "--datasets-dir",
         type=Path,
         default=DEFAULT_DATASETS_DIR,
-        help=f"Source .cha directory (default: {DEFAULT_DATASETS_DIR}).",
+        help=f"Source corpus directory base (default: {DEFAULT_DATASETS_DIR}).",
     )
     rn.add_argument(
         "--data-dir",
@@ -255,48 +268,48 @@ def _build_parser() -> argparse.ArgumentParser:
 
 
 def _source_name(corpus: str) -> str:
-    name: str = CORPORA[corpus].SOURCE_NAME
-    return name
+    return REGISTRY[corpus].source_name
 
 
 def _run_download(args: argparse.Namespace) -> int:
-    module = CORPORA[args.corpus]
+    adapter = REGISTRY[args.corpus]
     dest_dir = args.dest / args.corpus
-    files = module.download(dest_dir, force=args.force)
+    files = adapter.download(dest_dir, force=args.force)
     print(f"OK: {len(files)} files in {dest_dir}")
     return 0
 
 
 def _run_parse(args: argparse.Namespace) -> int:
-    if args.corpus != "sbcsae":
-        raise ValueError(f"parse adapter not registered for corpus: {args.corpus}")
-    source = _source_name(args.corpus)
-    _, utterances = chat_parser.parse(args.input_path, source=source)
-    out_path = args.data_dir / "parsed" / source / f"{args.input_path.stem}.jsonl"
+    adapter = REGISTRY[args.corpus]
+    corpus_dir = args.datasets_dir / args.corpus
+    utterances = adapter.parse_stem(corpus_dir, args.stem)
+    out_path = args.data_dir / "parsed" / adapter.source_name / f"{args.stem}.jsonl"
     n = write_jsonl(out_path, utterances)
     print(f"OK: wrote {n} utterances to {out_path}")
     return 0
 
 
 def _run_clean(args: argparse.Namespace) -> int:
-    if args.corpus != "sbcsae":
-        raise ValueError(f"clean adapter not registered for corpus: {args.corpus}")
-    source = _source_name(args.corpus)
-    in_path = args.data_dir / "parsed" / source / f"{args.stem}.jsonl"
+    adapter = REGISTRY[args.corpus]
+    in_path = args.data_dir / "parsed" / adapter.source_name / f"{args.stem}.jsonl"
     utterances = read_jsonl(in_path, Utterance)
-    cleaned = chat_cleaner.clean(utterances)
-    out_path = args.data_dir / "cleaned" / source / f"{args.stem}.jsonl"
+    cleaned = adapter.clean(utterances)
+    out_path = args.data_dir / "cleaned" / adapter.source_name / f"{args.stem}.jsonl"
     n = write_jsonl(out_path, cleaned)
     print(f"OK: wrote {n} cleaned utterances to {out_path}")
     return 0
 
 
 def _run_monologue(args: argparse.Namespace) -> int:
-    source = _source_name(args.corpus)
-    in_path = args.data_dir / "cleaned" / source / f"{args.stem}.jsonl"
+    adapter = REGISTRY[args.corpus]
+    in_path = args.data_dir / "cleaned" / adapter.source_name / f"{args.stem}.jsonl"
     utterances = read_jsonl(in_path, Utterance)
-    monologues = build_monologues(utterances, min_tokens=args.min_tokens)
-    out_path = args.data_dir / "monologues" / source / f"{args.stem}.jsonl"
+    monologues = build_monologues(
+        utterances,
+        min_tokens=args.min_tokens,
+        backchannel_words=adapter.backchannel_words,
+    )
+    out_path = args.data_dir / "monologues" / adapter.source_name / f"{args.stem}.jsonl"
     n = write_jsonl(out_path, monologues)
     print(f"OK: wrote {n} monologues to {out_path}")
     return 0
@@ -410,7 +423,7 @@ def _resolve_run_stems(args: argparse.Namespace) -> tuple[list[str], int]:
     """Resolve the stem list for `run` from positional stems or --all.
 
     Returns (stems, rc). rc=0 on success; rc=2 on argument conflict; rc=1 when
-    --all finds no .cha files in the corpus directory.
+    --all finds no stems in the corpus directory (per the adapter's enumerator).
     """
     if bool(args.stems) == bool(args.all_stems):
         print(
@@ -419,58 +432,65 @@ def _resolve_run_stems(args: argparse.Namespace) -> tuple[list[str], int]:
         )
         return [], 2
     if args.all_stems:
-        cha_dir = args.datasets_dir / args.corpus
-        stems = sorted(p.stem for p in cha_dir.glob("*.cha"))
+        corpus_dir = args.datasets_dir / args.corpus
+        stems = REGISTRY[args.corpus].enumerate_stems(corpus_dir)
         if not stems:
-            print(f"error: no .cha files found under {cha_dir}", file=sys.stderr)
+            print(f"error: no stems found under {corpus_dir}", file=sys.stderr)
             return [], 1
         return stems, 0
     return list(args.stems), 0
 
 
 def _run_single_stem(stem: str, args: argparse.Namespace) -> int:
-    """Process one stem through parse → clean → monologue → pairs → stats."""
-    source = _source_name(args.corpus)
-    cha_path = args.datasets_dir / args.corpus / f"{stem}.cha"
-    if not cha_path.exists():
+    """Process one stem through the pipeline up to and including args.through.
+
+    Input presence is verified via the adapter's stem enumerator so the check is
+    corpus-agnostic (CHAT = one .cha, Switchboard = a conversation's A/B files).
+    """
+    adapter = REGISTRY[args.corpus]
+    source = adapter.source_name
+    corpus_dir = args.datasets_dir / args.corpus
+    if stem not in set(adapter.enumerate_stems(corpus_dir)):
         print(
-            f"error: input not found: {cha_path}\n"
+            f"error: input not found for stem {stem!r} under {corpus_dir}\n"
             f"hint: run `scripttuner download {args.corpus}` first.",
             file=sys.stderr,
         )
         return 1
 
     base: dict[str, object] = {"corpus": args.corpus, "data_dir": args.data_dir}
-    stages: list[tuple[str, dict[str, object]]] = [
-        ("parse", {**base, "input_path": cha_path}),
-        ("clean", {**base, "stem": stem}),
-        ("monologue", {**base, "stem": stem, "min_tokens": args.min_tokens}),
-        (
-            "pairs",
-            {
-                **base,
-                "stem": stem,
-                "model": args.model,
-                "model_alias": args.model_alias,
-                "style": DEFAULT_STYLE,
-                "prompt_version": DEFAULT_PROMPT_VERSION,
-                "cache_dir": None,
-                "no_cache": args.no_cache,
-                "no_progress": args.no_progress,
-                "max_retries": args.max_retries,
-                "limit": args.limit,
-            },
-        ),
-        ("stats", {**base, "stem": stem, "no_pos": args.no_pos}),
-    ]
-    for name, kwargs in stages:
+    stage_kwargs: dict[str, dict[str, object]] = {
+        "parse": {**base, "stem": stem, "datasets_dir": args.datasets_dir},
+        "clean": {**base, "stem": stem},
+        "monologue": {**base, "stem": stem, "min_tokens": args.min_tokens},
+        "pairs": {
+            **base,
+            "stem": stem,
+            "model": args.model,
+            "model_alias": args.model_alias,
+            "style": DEFAULT_STYLE,
+            "prompt_version": DEFAULT_PROMPT_VERSION,
+            "cache_dir": None,
+            "no_cache": args.no_cache,
+            "no_progress": args.no_progress,
+            "max_retries": args.max_retries,
+            "limit": args.limit,
+        },
+        "stats": {**base, "stem": stem, "no_pos": args.no_pos},
+    }
+    last = RUN_STAGES.index(args.through)
+    for name in RUN_STAGES[: last + 1]:
         print(f"[run] {name} {args.corpus} {stem}", file=sys.stderr)
-        rc = _COMMANDS[name](argparse.Namespace(**kwargs))
+        rc = _COMMANDS[name](argparse.Namespace(**stage_kwargs[name]))
         if rc != 0:
             print(f"[run] {name} failed with rc={rc}", file=sys.stderr)
             return rc
+    out_subdir = {"parse": "parsed", "clean": "cleaned", "monologue": "monologues",
+                  "pairs": "pairs", "stats": "stats"}[args.through]
+    ext = "json" if args.through == "stats" else "jsonl"
     print(
-        f"[run] complete: data/stats/{source}/{stem}.json",
+        f"[run] complete (through {args.through}): "
+        f"data/{out_subdir}/{source}/{stem}.{ext}",
         file=sys.stderr,
     )
     return 0

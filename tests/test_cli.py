@@ -38,11 +38,23 @@ SAMPLE_CHA = """@UTF8
 
 
 def test_parse_clean_monologue_pipeline(tmp_path: Path) -> None:
-    cha_path = tmp_path / "SBC016.cha"
-    cha_path.write_text(SAMPLE_CHA, encoding="utf-8")
+    datasets_dir = tmp_path / "datasets"
+    sbcsae_dir = datasets_dir / "sbcsae"
+    sbcsae_dir.mkdir(parents=True)
+    (sbcsae_dir / "SBC016.cha").write_text(SAMPLE_CHA, encoding="utf-8")
     data_dir = tmp_path / "data"
 
-    rc = cli.main(["parse", "sbcsae", str(cha_path), "--data-dir", str(data_dir)])
+    rc = cli.main(
+        [
+            "parse",
+            "sbcsae",
+            "SBC016",
+            "--datasets-dir",
+            str(datasets_dir),
+            "--data-dir",
+            str(data_dir),
+        ]
+    )
     assert rc == 0
     parsed_path = data_dir / "parsed" / "SBCSAE" / "SBC016.jsonl"
     assert parsed_path.exists()
@@ -85,13 +97,25 @@ def test_parse_clean_monologue_pipeline(tmp_path: Path) -> None:
 
 
 def test_parse_writes_correct_count(tmp_path: Path) -> None:
-    cha_path = tmp_path / "tiny.cha"
-    cha_path.write_text(
+    datasets_dir = tmp_path / "datasets"
+    sbcsae_dir = datasets_dir / "sbcsae"
+    sbcsae_dir.mkdir(parents=True)
+    (sbcsae_dir / "tiny.cha").write_text(
         "@UTF8\n@Begin\n*A:\thello.\n*B:\tworld.\n@End\n",
         encoding="utf-8",
     )
     data_dir = tmp_path / "data"
-    rc = cli.main(["parse", "sbcsae", str(cha_path), "--data-dir", str(data_dir)])
+    rc = cli.main(
+        [
+            "parse",
+            "sbcsae",
+            "tiny",
+            "--datasets-dir",
+            str(datasets_dir),
+            "--data-dir",
+            str(data_dir),
+        ]
+    )
     assert rc == 0
     parsed = read_jsonl(data_dir / "parsed" / "SBCSAE" / "tiny.jsonl", Utterance)
     assert len(parsed) == 2
@@ -472,6 +496,65 @@ def test_run_subcommand_all_flag_empty_dir(tmp_path: Path) -> None:
         ]
     )
     assert rc == 1
+
+
+def _write_switchboard_conv(corpus_dir: Path) -> None:
+    """One conversation: A holds the floor (split by silence), B only backchannels."""
+    corpus_dir.mkdir(parents=True, exist_ok=True)
+    (corpus_dir / "sw2005A-ms98-a-trans.text").write_text(
+        "sw2005A-ms98-a-0001 0.0 4.0 well i really think nursing homes are a hard "
+        "decision for most families\n"
+        "sw2005A-ms98-a-0002 4.0 6.0 [silence]\n"
+        "sw2005A-ms98-a-0003 6.0 10.0 and you know my grandmother had to go into one "
+        "just last year\n",
+        encoding="utf-8",
+    )
+    (corpus_dir / "sw2005B-ms98-a-trans.text").write_text(
+        "sw2005B-ms98-a-0001 0.0 4.0 [silence]\n"
+        "sw2005B-ms98-a-0002 4.0 5.0 um-hum\n"
+        "sw2005B-ms98-a-0003 5.0 10.0 [silence]\n",
+        encoding="utf-8",
+    )
+
+
+def test_run_switchboard_through_monologue_stops_before_llm(tmp_path: Path) -> None:
+    datasets_dir = tmp_path / "datasets"
+    _write_switchboard_conv(datasets_dir / "switchboard")
+    data_dir = tmp_path / "data"
+
+    rc = cli.main(
+        [
+            "run",
+            "switchboard",
+            "--all",
+            "--through",
+            "monologue",
+            "--datasets-dir",
+            str(datasets_dir),
+            "--data-dir",
+            str(data_dir),
+            "--min-tokens",
+            "5",
+        ]
+    )
+    assert rc == 0
+
+    # stages up to monologue ran...
+    assert (data_dir / "parsed" / "Switchboard" / "sw2005.jsonl").exists()
+    assert (data_dir / "cleaned" / "Switchboard" / "sw2005.jsonl").exists()
+    mono_path = data_dir / "monologues" / "Switchboard" / "sw2005.jsonl"
+    assert mono_path.exists()
+    # ...and stopped before the LLM pairs stage + stats
+    assert not (data_dir / "pairs" / "Switchboard" / "sw2005.jsonl").exists()
+    assert not (data_dir / "stats" / "Switchboard" / "sw2005.json").exists()
+
+    monos = read_jsonl(mono_path, Monologue)
+    # A's two speech segments merge across B's "um-hum" backchannel into one monologue
+    assert len(monos) == 1
+    assert monos[0].speaker == "A"
+    assert monos[0].monologue_id.startswith("sw2005#mono_")
+    assert "nursing homes" in monos[0].text
+    assert "grandmother" in monos[0].text
 
 
 def test_aggregate_subcommand_concats_and_stats(tmp_path: Path) -> None:

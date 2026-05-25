@@ -113,6 +113,10 @@ class Utterance:
 
 ## 마커 처리 정책 (모듈 ② Cleaner)
 
+마커 체계는 코퍼스별로 다르므로 cleaner도 어댑터별이다 (cf. [ADR-0006](../decisions/0006-adapter-structure-and-common-ir.md), [ADR-0011](../decisions/0011-corpus-adapter-interface.md)).
+
+### CHAT (SBCSAE)
+
 | 마커 | 의미 | 처리 |
 |---|---|---|
 | `(.)`, `(..)` | 짧은/긴 포즈 | `<pause:short>` / `<pause:long>` |
@@ -125,6 +129,23 @@ class Utterance:
 | `&{l=X ... &}l=X` | 불명확/L2 표기 | 제거 |
 | `⌈ ⌉`, `⌊n ⌋n` | 오버랩 마커 | 제거 |
 | `760_1735` | 타임스탬프 | 제거 |
+
+### Switchboard (MSU/ISIP)
+
+PoC(`.work/switchboard-poc`) 실측 기반. 정규화 후 빈 발화(예: `[silence]` 전용 라인)는 ③ 도달 전 **drop**한다 (cf. [ADR-0009](../decisions/0009-switchboard-turn-reconstruction.md)).
+
+| 마커 | 의미 | 처리 |
+|---|---|---|
+| `[silence]`, `[noise]`, `[laughter]`, `[vocalized-noise]` | 비언어/이벤트 | 제거 |
+| `[laughter-yeah]` | 웃으며 발화한 단어 | → 단어만 (`yeah`) |
+| `h[ow]-`, `tr[aveled]-` | 단어 재시작/중단 stub | 제거 (앞선 disfluency 단어는 보존) |
+| `[bidness/business]` | 오발음 `[said/intended]` | → intended (슬래시 뒤) |
+| `{alrighty}` | 신조어/비표준어 | 중괄호만 제거, 단어 보존 |
+| `<b_aside>`, `<e_aside>` | 대화 외 발화 경계 | 마커 제거, 내부 텍스트 보존 |
+| `because_1`, `them_1` | disambiguation 인덱스 `_<digit>` | `_\d+` 제거 → 기본형 |
+| `AT&T`, `A&M` | 고유명사 | 보존 |
+
+타임스탬프(초)는 파서에서 `t_start_ms`/`t_end_ms`로 분리되며, A/B 면은 `t_start_ms` 기준으로 인터리브된다 (cf. ADR-0009).
 
 ## 출력 디렉토리 구조
 
@@ -222,3 +243,4 @@ POS 기반 지표는 spacy(`en_core_web_sm`)에 의존. CLI에 `--no-pos`로 비
 
 - **Semi-formal 스타일 데이터 통합**: 동일 파이프라인 재사용, `style` 메타속성만 변경 (cf. [ADR-0005](../decisions/0005-style-as-dataset-metadata.md))
 - **다른 코퍼스(Switchboard, BNC, TED 등) 통합**: `scripttuner/preprocessing/<format>/` 하위에 새 어댑터(parser + cleaner) 추가. ③~⑤ 재사용. IR 확장이 필요한 경우 `ir.py`의 `metadata` dict로 흡수 가능.
+  - **Switchboard(OpenSLR #5)**: 턴 재구성 방식 결정됨 (cf. [ADR-0009](../decisions/0009-switchboard-turn-reconstruction.md), 라이선스 [ADR-0010](../decisions/0010-switchboard-license-policy.md)). CHAT과 달리 한 대화의 두 화자가 별도 파일(A/B)에 있고 상대 턴은 `[silence]`로 표시되므로, **어댑터(파서)가 양면을 `t_start_ms`로 인터리브해 단일 화자-교대 스트림을 복원**한다 → ③ `monologue.py`·[ADR-0004](../decisions/0004-backchannel-handling.md) 무변경 재사용. `[silence]`·비언어는 전부 drop(`<pause>` 합성 안 함), 빈 utterance는 ③ 도달 전 drop, 백채널 사전은 `build_monologues`에 주입. 파싱 단위 = 파일이 아니라 **대화(A+B → `swNNNN`)**.
