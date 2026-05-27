@@ -356,6 +356,23 @@ def _build_parser() -> argparse.ArgumentParser:
     gn.add_argument("--batch-size", type=int, default=8)
     gn.add_argument("--max-seq-length", type=int, default=2048)
 
+    ev = subparsers.add_parser(
+        "evaluate",
+        help="Compute spoken-ness metrics (length/filler/pause/lexical density) for predictions.",
+    )
+    ev.add_argument(
+        "--predictions", type=Path, required=True, help="predictions.jsonl from `generate`."
+    )
+    ev.add_argument(
+        "--output",
+        type=Path,
+        default=None,
+        help="Metrics JSON (default: metrics.json beside the predictions file).",
+    )
+    ev.add_argument(
+        "--no-pos", action="store_true", help="Skip POS-based metrics (lexical density)."
+    )
+
     rn = subparsers.add_parser(
         "run",
         help="End-to-end pipeline: parse > clean > monologue > pairs > stats. "
@@ -662,6 +679,19 @@ def _run_generate(args: argparse.Namespace) -> int:
     return 0
 
 
+def _run_evaluate(args: argparse.Namespace) -> int:
+    from scripttuner.training.evaluate import run_evaluate
+
+    output_path = args.output or (args.predictions.parent / "metrics.json")
+    metrics = run_evaluate(
+        predictions_path=args.predictions,
+        output_path=output_path,
+        include_pos=not args.no_pos,
+    )
+    print(f"OK: wrote metrics for {metrics['n']} predictions to {output_path}")
+    return 0
+
+
 def _resolve_run_stems(args: argparse.Namespace) -> tuple[list[str], int]:
     """Resolve the stem list for `run` from positional stems or --all.
 
@@ -774,6 +804,7 @@ _COMMANDS = {
     "format": _run_format,
     "train": _run_train,
     "generate": _run_generate,
+    "evaluate": _run_evaluate,
     "run": _run_run,
 }
 
