@@ -101,6 +101,10 @@ def run_finetune(
         },
         "train_loss": result["train_loss"],
         "train_runtime_sec": result["train_runtime_sec"],
+        "early_stopping": result.get("early_stopping", False),
+        "best_eval_loss": result.get("best_metric"),
+        "stopped_epoch": result.get("stopped_epoch"),
+        "log_history_path": result.get("log_history_path"),
         "date": date.today().isoformat(),
     }
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -233,6 +237,7 @@ def _train_seq2seq(
         AutoModelForSeq2SeqLM,
         AutoTokenizer,
         DataCollatorForSeq2Seq,
+        EarlyStoppingCallback,
         Seq2SeqTrainer,
         Seq2SeqTrainingArguments,
     )
@@ -281,9 +286,26 @@ def _train_seq2seq(
     duration: dict[str, Any] = (
         {"max_steps": max_steps} if max_steps else {"num_train_epochs": epochs}
     )
+    # validation이 있으면 epoch마다 평가·체크포인트 저장하고 EarlyStopping(patience=2)을 건다.
+    # load_best_model_at_end=True 로 평가 최저 loss 시점의 어댑터를 최종 저장.
+    eval_enabled = val_path is not None
+    eval_kwargs: dict[str, Any] = (
+        {
+            "eval_strategy": "epoch",
+            "save_strategy": "epoch",
+            "save_total_limit": 2,
+            "load_best_model_at_end": True,
+            "metric_for_best_model": "eval_loss",
+            "greater_is_better": False,
+        }
+        if eval_enabled
+        else {}
+    )
     args = Seq2SeqTrainingArguments(
         output_dir=str(output_dir / "trainer"),
         per_device_train_batch_size=batch_size,
+        # HF 기본 eval batch는 train과 무관하게 8 — 8GB GPU에서 즉시 OOM이라 train과 동일하게 둔다.
+        per_device_eval_batch_size=batch_size,
         gradient_accumulation_steps=grad_accum,
         learning_rate=learning_rate,
         logging_steps=1,
@@ -293,20 +315,30 @@ def _train_seq2seq(
         gradient_checkpointing_kwargs={"use_reentrant": False},
         seed=seed,
         report_to="none",
+        **eval_kwargs,
         **duration,
     )
     trainer = Seq2SeqTrainer(
         model=model,
         args=args,
         train_dataset=tokenized["train"],
+        eval_dataset=tokenized.get("validation") if eval_enabled else None,
         data_collator=collator,
         processing_class=tokenizer,
+        callbacks=[EarlyStoppingCallback(early_stopping_patience=2)] if eval_enabled else [],
     )
     train_result = trainer.train()
 
     adapter_dir = output_dir / "adapter"
     model.save_pretrained(str(adapter_dir))
     tokenizer.save_pretrained(str(adapter_dir))
+
+    # 학습 곡선 시각화를 위해 step별 train/eval loss 로그를 영구화.
+    log_history_path = output_dir / "log_history.json"
+    log_history_path.write_text(
+        json.dumps(trainer.state.log_history, indent=2, ensure_ascii=False),
+        encoding="utf-8",
+    )
 
     metrics: dict[str, Any] = getattr(train_result, "metrics", {}) or {}
     return {
@@ -316,4 +348,8 @@ def _train_seq2seq(
         "n_validation": tokenized["validation"].num_rows if "validation" in tokenized else 0,
         "train_loss": metrics.get("train_loss"),
         "train_runtime_sec": metrics.get("train_runtime"),
+        "log_history_path": str(log_history_path),
+        "early_stopping": eval_enabled,
+        "best_metric": trainer.state.best_metric if eval_enabled else None,
+        "stopped_epoch": trainer.state.epoch if eval_enabled else None,
     }

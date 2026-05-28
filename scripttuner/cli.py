@@ -375,6 +375,30 @@ def _build_parser() -> argparse.ArgumentParser:
         "--no-pos", action="store_true", help="Skip POS-based metrics (lexical density)."
     )
 
+    pl = subparsers.add_parser(
+        "plot",
+        help="Plot training curves (train/eval loss) from log_history.json.",
+    )
+    pl.add_argument("model_key", choices=sorted(MODEL_KEYS), help="Target model key.")
+    pl.add_argument("corpus", choices=sorted(REGISTRY), help="Corpus name.")
+    pl.add_argument(
+        "--run-name",
+        default=None,
+        help="Run name (default: <model_key>-<SOURCE>-lora).",
+    )
+    pl.add_argument(
+        "--log-history",
+        type=Path,
+        default=None,
+        help="log_history.json (default: runs/finetune/<run-name>/log_history.json).",
+    )
+    pl.add_argument(
+        "--output",
+        type=Path,
+        default=None,
+        help="Output PNG (default: runs/finetune/<run-name>/training_curves.png).",
+    )
+
     rn = subparsers.add_parser(
         "run",
         help="End-to-end pipeline: parse > clean > monologue > pairs > stats. "
@@ -696,6 +720,23 @@ def _run_evaluate(args: argparse.Namespace) -> int:
     return 0
 
 
+def _run_plot(args: argparse.Namespace) -> int:
+    from scripttuner.training.plot import plot_training_curves
+
+    source = _source_name(args.corpus)
+    run_name = args.run_name or f"{args.model_key}-{source}-lora"
+    log_history = args.log_history or (
+        Path("runs") / "finetune" / run_name / "log_history.json"
+    )
+    output_path = args.output or (Path("runs") / "finetune" / run_name / "training_curves.png")
+    summary = plot_training_curves(log_history_path=log_history, output_path=output_path)
+    print(
+        f"OK: wrote training curves to {output_path} "
+        f"({summary['n_train_points']} train, {summary['n_eval_points']} eval points)"
+    )
+    return 0
+
+
 def _resolve_run_stems(args: argparse.Namespace) -> tuple[list[str], int]:
     """Resolve the stem list for `run` from positional stems or --all.
 
@@ -809,6 +850,7 @@ _COMMANDS = {
     "train": _run_train,
     "generate": _run_generate,
     "evaluate": _run_evaluate,
+    "plot": _run_plot,
     "run": _run_run,
 }
 

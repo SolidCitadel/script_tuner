@@ -31,6 +31,7 @@ train = [
     "torch>=2.4",
     "unsloth",
     "triton-windows ; sys_platform == 'win32'",
+    "matplotlib>=3.8",
 ]
 
 [build-system]
