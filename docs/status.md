@@ -2,7 +2,7 @@
 
 > 본 문서는 **상태 추적용**이다. 일상적으로 업데이트한다. 정적 설계는 `docs/design/`, 결정 이력은 `docs/decisions/`(ADR), 거친 작업 메모는 `.work/`(gitignore)에 둔다.
 
-마지막 업데이트: 2026-05-28
+마지막 업데이트: 2026-05-29
 
 ---
 
@@ -34,7 +34,7 @@
 
 ## 다음 액션 (단기)
 
-1. 보고서/발표 준비 — 학습 곡선(`runs/finetune/<run>/training_curves.png`)·메트릭 비교(`runs/eval/<run>/metrics.json`) 정리.
+1. 보고서/발표 준비 — 집계 산출물은 `report/`에 정리됨([metrics_summary.md](../report/metrics_summary.md) = 1-epoch vs 조기종료 비교, training_curves.png, samples.md). 실제 보고서·발표 문서 작성 남음.
 2. (선택) Semi-formal 데이터 조달 방안 결정 — teacher-LLM 합성 vs 외부 코퍼스. 결정되면 두 번째 학습 사이클 가능.
 3. (선택) Switchboard ④ LLM pairs → SBCSAE와 `aggregate` 합산해 학습 데이터 확장 (비용 발생).
 4. 학습 target cleaning 정책 — spoken_text의 전사 잔여 표기 처리. 현재 ref-정렬 메트릭이 양호해 우선순위 낮음.
