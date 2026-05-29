@@ -111,3 +111,38 @@ OPENAI_API_KEY=<your-key>
 OPENAI_BASE_URL=<provider-endpoint>
 # LLM_MODEL=<model-slug>   # 선택; CLI --model로도 가능
 ```
+
+## 팀원 Quick Start (학습된 모델 사용/재현)
+
+학습된 어댑터·데이터는 HF org **`aip-scripttuner-team`**(private)에 있다.
+SBCSAE가 CC BY-ND라 전부 private이며, 접근하려면 org 멤버 초대가 필요하다.
+
+**사전 준비**
+1. [HF 계정](https://huggingface.co) → org `aip-scripttuner-team` 멤버 초대 수락 (유지보수자에게 요청)
+2. base 모델 [라이선스 수락](https://huggingface.co/google/t5gemma-2-1b-1b) (gated)
+3. HF Settings → Access Tokens에서 read 토큰 발급 → `.env`에 `HF_TOKEN=<토큰>`
+4. `git clone https://github.com/SolidCitadel/script-tuner.git && cd script-tuner && uv sync --group train`
+
+**A. 학습된 모델만 써보기 (재학습 X, GPU 권장)**
+```bash
+# 어댑터는 HF에서 자동 다운로드/캐시된다 (--adapter-dir에 repo id 지정)
+uv run scripttuner generate t5gemma2-1b sbcsae --split test \
+    --adapter-dir aip-scripttuner-team/scripttuner-t5gemma2-1b-sbcsae-casual
+uv run scripttuner evaluate --predictions runs/eval/t5gemma2-1b-SBCSAE-lora/predictions.jsonl
+```
+
+**B. 직접 학습 (전처리·LLM 비용 스킵)**
+```bash
+# formatted splits를 HF dataset에서 받아 학습 입력 위치에 둠
+huggingface-cli download aip-scripttuner-team/scripttuner-sbcsae-formatted-t5gemma2-1b \
+    --repo-type dataset --local-dir data/finetune/SBCSAE/formatted/t5gemma2-1b
+uv run scripttuner train t5gemma2-1b sbcsae \
+    --batch-size 1 --grad-accum 16 --max-seq-length 1024 --epochs 8   # ~2h on 8GB GPU
+uv run scripttuner generate t5gemma2-1b sbcsae --split test
+uv run scripttuner evaluate --predictions runs/eval/t5gemma2-1b-SBCSAE-lora/predictions.jsonl
+uv run scripttuner plot t5gemma2-1b sbcsae
+```
+
+**C. 전처리부터 전부 재현** — 위 [환경 셋업](#환경-셋업)의 `download → run → aggregate → split → format`을 거친 뒤 B의 `train` 이후를 실행. `pairs` 단계는 LLM API 키가 필요하다.
+
+> 어댑터 재업로드(재학습 후)는 `scripts/push_to_hf.py` 참조. 보고서용 집계 결과는 [`report/`](report/).
